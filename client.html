@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <h1>Ball Game</h1>
+    <button id = 'btnCreate'>New Game</button>
+    <button id = 'btnJoin'>Join Game</button>
+    <input type = 'text' id = 'txtGameId'>
+    <div id  = 'divClientId'></div>
+    <div id  = 'divPlayers'></div>
+    <div id  = 'divBoard'></div>
+
+
+    <script>
+
+        //Client browser state
+        let clientId = null;
+        let gameId = null;
+        let playerColor = null;
+
+        let ws = new WebSocket("ws://localhost:9090")
+
+        //HTML elements
+        const btnCreate = document.getElementById("btnCreate");
+        const btnJoin = document.getElementById("btnJoin");
+        const txtGameId = document.getElementById("txtGameId");
+        const divPlayers = document.getElementById("divPlayers");
+        const divBoard = document.getElementById("divBoard");
+        const divClientId = document.getElementById("divClientId");
+
+        //Listen to events on HTML elements and send game request to server
+        btnCreate.addEventListener("click", e => {
+            if(gameId){
+                console.log("Already created or joined a game!")
+                return;
+            }
+            
+            const payLoad = {
+                "method": "create",
+                "clientId": clientId
+            }
+
+            ws.send(JSON.stringify(payLoad));
+        })
+
+        btnJoin.addEventListener("click", e => {
+            console.log("Join button called! " + txtGameId.value);
+            sendGameId = null;
+            
+            if(gameId == null){
+                if(txtGameId.value == "") return;
+                sendGameId = txtGameId.value;
+            }else if(gameId){
+                sendGameId = gameId;
+            }else return;
+            
+            //Extract game ID in text box whether the client has created a game or not
+            const payLoad = {
+                "method": "join",
+                "clientId": clientId,
+                "gameId": sendGameId
+            }
+
+            ws.send(JSON.stringify(payLoad));
+        })
+
+        ws.onmessage = serverSocketResp => {
+            const serverSocketRespJSON = JSON.parse(serverSocketResp.data);
+
+            if (serverSocketRespJSON.method === "restart"){
+                console.log("A client has left the game, restarting the game for " + clientId)
+                location.reload()
+            }
+
+            if (serverSocketRespJSON.method === "connected"){
+                clientId = serverSocketRespJSON.clientId;
+                divClientId.innerText = "Client ID Set successfully " + clientId;
+            }
+
+            if (serverSocketRespJSON.method === "created"){
+                gameId = serverSocketRespJSON.game.id;
+                divClientId.innerText = divClientId.innerText + "\n Game successfully created with id " + serverSocketRespJSON.game.id + " with " + serverSocketRespJSON.game.balls + " balls";
+            }
+
+            if (serverSocketRespJSON.method === "joined"){
+                console.log("ID :" + clientId + " Joined the game!")
+                const joinedGame = serverSocketRespJSON.game;
+                if(gameId == null) gameId = joinedGame.id;
+
+                while(divPlayers.firstChild) divPlayers.removeChild (divPlayers.firstChild);
+
+                joinedGame.clients.forEach (clientInGame => {
+                    if (clientInGame.clientId === clientId) playerColor = clientInGame.color;
+                    const playerInGameDivHTML = document.createElement("div");
+                    playerInGameDivHTML.style.width = "200px";
+                    playerInGameDivHTML.style.background = clientInGame.color;
+                    playerInGameDivHTML.textContent = clientInGame.clientId;
+                    divPlayers.appendChild(playerInGameDivHTML);
+                })
+
+                if(serverSocketRespJSON.reqJoinClientId === clientId){
+                    for (let i = 0; i < joinedGame.balls; i++){
+                        const buttonHTML = document.createElement("button");
+                        buttonHTML.id = "ball" + (i + 1);
+                        buttonHTML.sendId = i + 1;
+                        buttonHTML.textContent = i + 1;
+                        buttonHTML.style.width = "150px";
+                        buttonHTML.style.height = "150px";
+                        divBoard.appendChild(buttonHTML);
+
+                        buttonHTML.addEventListener("click", e => {
+
+                            const buttonChangePayLoad = {
+                                "method": "play",
+                                "clientId": clientId,
+                                "gameId": gameId,
+                                "ballId": buttonHTML.sendId,
+                                "color": playerColor
+                            }
+
+                            ws.send(JSON.stringify(buttonChangePayLoad));
+                        })
+                    }
+                }
+                
+
+            }
+
+            if (serverSocketRespJSON.method === "broadcast"){
+                if (!serverSocketRespJSON.game.state) return;
+                for(const ballIdKey of Object.keys(serverSocketRespJSON.game.state))
+                {
+                    const color = serverSocketRespJSON.game.state[ballIdKey];
+                    const ballHtmlElement = document.getElementById("ball" + ballIdKey);
+                    ballHtmlElement.style.backgroundColor = color
+                }
+
+            }
+
+        }
+    </script>
+</body>
+</html>
